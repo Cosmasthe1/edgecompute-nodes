@@ -95,6 +95,12 @@ class JobSubmitResponse(BaseModel):
     status: JobStatus
 
 
+class HealthResponse(BaseModel):
+    status: str
+    active_nodes: int
+    queued_jobs: int
+
+
 # ---------------------------------------------------------------------------
 # Internal server-side records (not exposed directly over the wire)
 # ---------------------------------------------------------------------------
