@@ -1,0 +1,15 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+# Keep the signal high: real bugs (F = pyflakes, E = pycodestyle errors) and
+# import hygiene, without style nitpicks (C4 comprehension style, etc.) that
+# would just generate noise across a codebase this size.
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length is handled by the formatter/line-length setting, not a hard error
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # sys.path.insert-before-import pattern is intentional in test files
