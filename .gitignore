@@ -7,3 +7,4 @@ htmlcov/
 .venv/
 venv/
 server.log
+.ruff_cache/
