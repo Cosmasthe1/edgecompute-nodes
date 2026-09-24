@@ -16,6 +16,9 @@ from __future__ import annotations
 import time
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 from .ledger import compute_payout
 from .logging_config import configure_json_logging, get_logger
@@ -44,6 +47,11 @@ app = FastAPI(title="EdgeCompute Orchestrator", version="0.1.0")
 
 DEFAULT_STRATEGY = "hybrid"
 
+# Prometheus metrics
+JOB_SUBMITTED = Counter("edgecompute_jobs_submitted_total", "Total submitted jobs")
+JOB_COMPLETED = Counter("edgecompute_jobs_completed_total", "Total completed jobs")
+JOB_FAILED = Counter("edgecompute_jobs_failed_total", "Total failed jobs")
+JOB_RUNTIME_SECONDS = Histogram("edgecompute_job_runtime_seconds", "Job runtime seconds")
 
 @app.post("/nodes/register", response_model=NodeRegisterResponse)
 def register_node(req: NodeRegisterRequest) -> NodeRegisterResponse:
@@ -128,12 +136,19 @@ def _handle_job_result(node: Node, result: JobResult) -> None:
                 "runtime_seconds": round(runtime_seconds, 3), "payout": round(payout, 4),
             },
         )
+        try:
+            JOB_RUNTIME_SECONDS.observe(runtime_seconds)
+        except Exception:
+            # metrics should never break the app; swallow failures
+            pass
+        JOB_COMPLETED.inc()
     elif not result.success:
         log.info(
             "job failed, requeueing",
             extra={"job_id": job.job_id, "node_id": node.node_id},
         )
         STORE.requeue(job)
+        JOB_FAILED.inc()
 
 
 @app.post("/jobs", response_model=JobSubmitResponse)
@@ -145,6 +160,7 @@ def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         origin_lon=req.origin_lon,
     )
     STORE.submit_job(job)
+    JOB_SUBMITTED.inc()
     log.info(
         "job queued",
         extra={
@@ -187,6 +203,17 @@ def health() -> HealthResponse:
 def healthz() -> HealthResponse:
     """Alias of /health for infrastructure that expects the /healthz convention."""
     return health()
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus metrics endpoint."""
+    try:
+        data = generate_latest()
+        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+    except Exception:
+        # metrics endpoint must not crash the app
+        return Response(content=b"", media_type=CONTENT_TYPE_LATEST)
 
 
 def reap_stale_nodes() -> None:
