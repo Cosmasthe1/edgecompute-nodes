@@ -13,14 +13,15 @@ Run with:  uvicorn orchestrator.main:app --reload --port 8000
 """
 from __future__ import annotations
 
-import logging
 import time
 
 from fastapi import FastAPI, HTTPException
 
 from .ledger import compute_payout
+from .logging_config import configure_json_logging, get_logger
 from .models import (
     AssignedJob,
+    HealthResponse,
     Job,
     JobResult,
     JobStatus,
@@ -36,8 +37,8 @@ from .reliability import update_on_job_result, update_on_missed_poll
 from .scheduler import select_node
 from .state import STORE
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("edgecompute.orchestrator")
+configure_json_logging()
+log = get_logger("edgecompute.orchestrator")
 
 app = FastAPI(title="EdgeCompute Orchestrator", version="0.1.0")
 
@@ -55,7 +56,10 @@ def register_node(req: NodeRegisterRequest) -> NodeRegisterResponse:
         energy_cost_per_kwh=req.energy_cost_per_kwh,
     )
     STORE.register_node(node)
-    log.info("registered node %s (tier=%s, region=%s)", node.node_id, node.tier, node.region)
+    log.info(
+        "node registered",
+        extra={"node_id": node.node_id, "tier": int(node.tier), "region": node.region},
+    )
     return NodeRegisterResponse(node_id=node.node_id)
 
 
@@ -85,7 +89,10 @@ def poll(node_id: str, req: PollRequest) -> PollResponse:
                 assigned = AssignedJob(
                     job_id=job.job_id, payload=job.payload, requirements=job.requirements,
                 )
-                log.info("assigned job %s -> node %s", job.job_id, node.node_id)
+                log.info(
+                    "job assigned",
+                    extra={"job_id": job.job_id, "node_id": node.node_id},
+                )
             else:
                 STORE.requeue(job)  # didn't fit this node after all; put back
 
@@ -95,7 +102,10 @@ def poll(node_id: str, req: PollRequest) -> PollResponse:
 def _handle_job_result(node: Node, result: JobResult) -> None:
     job = STORE.get_job(result.job_id)
     if job is None:
-        log.warning("result for unknown job %s from node %s", result.job_id, node.node_id)
+        log.warning(
+            "result for unknown job",
+            extra={"job_id": result.job_id, "node_id": node.node_id},
+        )
         return
 
     job.result = result
@@ -111,10 +121,18 @@ def _handle_job_result(node: Node, result: JobResult) -> None:
         runtime_seconds = job.completed_at - job.assigned_at
         payout = compute_payout(job.requirements, runtime_seconds, node.reliability_score)
         node.credit_balance += payout
-        log.info("job %s completed on %s in %.2fs, paid %.4f credits",
-                  job.job_id, node.node_id, runtime_seconds, payout)
+        log.info(
+            "job completed",
+            extra={
+                "job_id": job.job_id, "node_id": node.node_id,
+                "runtime_seconds": round(runtime_seconds, 3), "payout": round(payout, 4),
+            },
+        )
     elif not result.success:
-        log.info("job %s FAILED on node %s — requeueing", job.job_id, node.node_id)
+        log.info(
+            "job failed, requeueing",
+            extra={"job_id": job.job_id, "node_id": node.node_id},
+        )
         STORE.requeue(job)
 
 
@@ -127,8 +145,13 @@ def submit_job(req: JobSubmitRequest) -> JobSubmitResponse:
         origin_lon=req.origin_lon,
     )
     STORE.submit_job(job)
-    log.info("job %s queued (cpu=%.1f ram=%.1fGB gpu=%d)",
-              job.job_id, req.requirements.cpu_cores, req.requirements.ram_gb, req.requirements.gpu_count)
+    log.info(
+        "job queued",
+        extra={
+            "job_id": job.job_id, "cpu_cores": req.requirements.cpu_cores,
+            "ram_gb": req.requirements.ram_gb, "gpu_count": req.requirements.gpu_count,
+        },
+    )
     return JobSubmitResponse(job_id=job.job_id, status=job.status)
 
 
@@ -150,13 +173,20 @@ def list_nodes():
     ]
 
 
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "active_nodes": len(STORE.active_nodes()),
-        "queued_jobs": len(STORE.queue),
-    }
+@app.get("/health", response_model=HealthResponse, tags=["health"], summary="Health check")
+def health() -> HealthResponse:
+    """Liveness/readiness probe: reports orchestrator status and pool size."""
+    return HealthResponse(
+        status="ok",
+        active_nodes=len(STORE.active_nodes()),
+        queued_jobs=len(STORE.queue),
+    )
+
+
+@app.get("/healthz", response_model=HealthResponse, tags=["health"], summary="Health check (alias)")
+def healthz() -> HealthResponse:
+    """Alias of /health for infrastructure that expects the /healthz convention."""
+    return health()
 
 
 def reap_stale_nodes() -> None:
@@ -171,6 +201,9 @@ def reap_stale_nodes() -> None:
         if node.current_job_id:
             job = STORE.get_job(node.current_job_id)
             if job and job.status in (JobStatus.ASSIGNED, JobStatus.RUNNING):
-                log.info("node %s went stale mid-job %s — requeueing", node.node_id, job.job_id)
+                log.info(
+                    "node went stale mid-job, requeueing",
+                    extra={"node_id": node.node_id, "job_id": job.job_id},
+                )
                 STORE.requeue(job)
             node.current_job_id = None
