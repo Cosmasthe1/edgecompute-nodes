@@ -7,22 +7,54 @@ on:
     branches: ["**"]
 
 jobs:
-  lint-and-test:
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: mypy orchestrator agent
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install dependencies (pinned)
-        run: pip install -r requirements.lock.txt pytest pytest-cov ruff
-
-      - name: Lint
-        run: ruff check .
-
+        run: pip install -r requirements-dev.txt
       - name: Run tests with coverage
         run: pytest --cov=orchestrator --cov=agent --cov-report=term --cov-fail-under=50
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - name: Audit dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build orchestrator image
+        run: docker build -t edgecompute-orchestrator:ci .
