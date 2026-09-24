@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -r requirements-dev.txt
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt --no-cache-dir
       - run: ruff check .
 
   typecheck:
@@ -23,8 +23,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -r requirements-dev.txt
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt --no-cache-dir
       - run: mypy orchestrator agent
 
   test:
@@ -34,9 +34,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"
+      - name: Check lockfiles are up-to-date
+        run: |
+          pip install pip-tools
+          pip-compile --check --output-file=requirements.txt requirements.in
       - name: Install dependencies (pinned)
-        run: pip install -r requirements-dev.txt
+        run: pip install -r requirements-dev.txt --no-cache-dir
       - name: Run tests with coverage
         run: pytest --cov=orchestrator --cov=agent --cov-report=term --cov-fail-under=50
 
@@ -46,8 +50,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -r requirements-dev.txt
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt --no-cache-dir
       - name: Audit dependencies for known vulnerabilities
         run: pip-audit -r requirements.txt
 
