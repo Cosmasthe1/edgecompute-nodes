@@ -1,10 +1,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-.coverage
 htmlcov/
 *.egg-info/
 .venv/
 venv/
 server.log
 .ruff_cache/
+.coverage
