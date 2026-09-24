@@ -45,6 +45,24 @@ python simulator/simulate.py --url http://localhost:8000 --nodes 8 --jobs 20
 Check `GET /health` or `GET /nodes` on the orchestrator at any time to see
 live state.
 
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+pytest --cov=orchestrator --cov=agent --cov-report=term
+```
+
+41 tests, 88% line coverage on `orchestrator/` and `agent/`. This includes a
+self-contained integration test (`tests/test_integration_simulation.py`)
+that starts the FastAPI app in-process on an ephemeral port and drives a
+real `NodeAgent` against it — no manually started server required, so it
+runs the same way locally and in CI.
+
+CI (`.github/workflows/ci.yml`) runs `ruff check` and the full test suite
+with a coverage gate on every push, installing from `requirements.lock.txt`
+for reproducible builds.
+
 ## What's implemented vs. deferred
 
 | Piece | Status |
@@ -56,9 +74,13 @@ live state.
 | Credit-based incentive ledger | ✅ implemented (`ledger.py`) |
 | Stale-node detection + missed-poll penalty + job requeue | ✅ implemented (`reap_stale_nodes`) |
 | In-memory state | ✅ implemented — **swap point for Redis**, see `state.py` |
+| Test suite (pytest, unit + in-process integration) | ✅ implemented — 41 tests, 88% coverage on `orchestrator/`+`agent/` |
+| CI (lint + test on every push) | ✅ implemented (`.github/workflows/ci.yml`) |
+| Pinned/reproducible dependencies | ✅ implemented (`requirements.lock.txt`, generated from a clean venv) |
 | Real container execution (Docker) of job payloads | ⏳ stubbed — `NodeAgent._execute` currently simulates work with `sleep()`; swap for `docker run` |
 | RL-based scheduling strategy | ⏳ not implemented — documented stretch goal in the proposal |
-| Prometheus/Grafana metrics export | ⏳ not implemented — `simulator/simulate.py` prints a text report instead |
+| Structured logging + Prometheus/Grafana metrics export | ⏳ not implemented — current logging is plain `logging.basicConfig`; `simulator/simulate.py` prints a text report instead |
+| Dockerfile / devcontainer | ⏳ not implemented |
 | Go rewrite of the hot path (poll endpoint / agent binary) | ⏳ next milestone, after load-testing this Python version to find the actual bottleneck |
 
 ## Design notes worth knowing when you extend this
